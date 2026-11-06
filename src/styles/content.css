@@ -1,0 +1,64 @@
+.content-area--grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px 24px;
+}
+
+.content-area--campaign {
+  padding: 16px 24px 24px;
+}
+
+.campaign-section {
+  margin-bottom: 32px;
+}
+
+.campaign-section__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.campaign-section__title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 4px;
+  border-left: 4px solid var(--border-strong);
+  padding-left: 8px;
+}
+
+.campaign-section__description {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+
+.campaign-section__download-all {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(to bottom, var(--btn-grad-1), var(--btn-grad-2));
+  color: var(--accent-text);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.campaign-section__download-all:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.campaign-section__row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empty-state {
+  color: var(--text-muted);
+  padding: 40px 24px;
+}

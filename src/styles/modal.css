@@ -1,0 +1,251 @@
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal {
+  position: relative;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+}
+
+.modal__body {
+  padding: 16px 20px 20px;
+}
+
+.modal__carousel {
+  position: relative;
+}
+
+.modal__carousel-img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border-radius: var(--radius) var(--radius) 0 0;
+  display: block;
+  cursor: zoom-in;
+  background: #000;
+}
+
+.modal__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  color: #fff;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal__carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal__carousel-arrow--prev {
+  left: 8px;
+}
+
+.modal__carousel-arrow--next {
+  right: 8px;
+}
+
+.modal__carousel-dots {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+
+.modal__carousel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+
+.modal__carousel-dot.is-active {
+  background: #fff;
+}
+
+.modal__title {
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+
+.modal__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.modal__author-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--accent-text);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.modal__author-link:hover {
+  opacity: 0.8;
+}
+
+.modal__description {
+  white-space: pre-wrap;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.modal__header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modal__header-row .modal__title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.modal__favorite-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(to bottom, var(--btn-grad-1), var(--btn-grad-2));
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modal__favorite-btn.is-active {
+  background: #ff4d6d;
+  color: #ffffff;
+  border-color: #ff4d6d;
+}
+
+.modal__notes {
+  margin-top: 14px;
+}
+
+.modal__notes-label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.modal__notes-textarea {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.modal__notes-textarea:focus {
+  outline: none;
+  border-color: var(--accent-text);
+}
+
+.modal__share-btn {
+  margin-top: 14px;
+}
+
+.modal__size {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-text);
+  line-height: 1.3;
+}
+
+.modal__progress {
+  height: 5px;
+  border-radius: 2px;
+  background: #eee;
+  border: 1px solid var(--border);
+  margin: 10px 0;
+  overflow: hidden;
+}
+
+.modal__progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(to bottom, var(--btn-grad-1), var(--border-strong));
+  transition: width 0.2s ease;
+}
+
+.modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10001;
+  cursor: zoom-out;
+}
+
+.image-preview-overlay__img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius);
+}

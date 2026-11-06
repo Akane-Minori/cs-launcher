@@ -1,0 +1,49 @@
+:root {
+  --bg: #ffffff;
+  --card-bg: #fafafa;
+  --text: #1a1a1a;
+  --text-muted: #7a7a7a;
+  --accent-text: #cc0000;
+  --accent-single: #3d9fdb;
+  --border: #cccccc;
+  --border-strong: #aaaaaa;
+  --btn-grad-1: #fdfdfd;
+  --btn-grad-2: #dcdcdc;
+  --chip-bg: #ffffff;
+  --chip-border: #c4c4c4;
+  --radius: 3px;
+  --content-width: 1040px; /* niconicoの #main{width:1024px} に相当 */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  /* 上下スクロール端でのゴムバンド(バウンス)挙動を止める */
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  background: #f4f4f4;
+  color: var(--text);
+  font-family: 'Meiryo', 'Hiragino Kaku Gothic ProN', 'MS PGothic', sans-serif;
+  overflow-x: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* 幅を固定して中央寄せ。全画面化すると左右に隙間ができる */
+#main {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 auto;
+}

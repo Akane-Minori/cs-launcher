@@ -1,0 +1,8 @@
+@import './styles/base.css';
+@import './styles/header.css';
+@import './styles/top-bar.css';
+@import './styles/content.css';
+@import './styles/game-card.css';
+@import './styles/modal.css';
+@import './styles/pagination.css';
+@import './styles/misc.css';

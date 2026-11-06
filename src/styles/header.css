@@ -1,0 +1,97 @@
+#header {
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 9999;
+}
+
+.header__top {
+  background: #272727;
+  color: #ffffff;
+}
+
+/* siteheader-content(幅固定・中央寄せ)に相当。#main と同じ幅で左右を揃える */
+.header__inner {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 0 16px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+}
+
+.header__logo {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header__actions {
+  display: flex;
+  height: 36px;
+}
+
+.header__action-btn {
+  height: 36px;
+  line-height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-left: 1px solid #666666;
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.header__action-btn:hover {
+  background: #474747;
+}
+
+/* final.css の .greenchar / .yellowchar と同じ配色 */
+.header__action-btn--gacha {
+  color: #39c4c1;
+}
+
+.header__action-btn--folder {
+  color: #d9a300;
+}
+
+.header__nav {
+  background: #ffffff;
+  border-top: 2px solid #666666;
+  border-bottom: 1px solid var(--border);
+}
+
+.header__inner--nav {
+  height: auto;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  padding: 0 16px;
+}
+
+.header__nav-item {
+  border: none;
+  background: transparent;
+  color: #333333;
+  font-size: 0.9rem;
+  padding: 8px 20px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.header__nav-item:hover {
+  background: #333333;
+  color: #ffffff;
+}
+
+.header__nav-item.is-active {
+  background: #333333;
+  color: #ffffff;
+  font-weight: 700;
+}
