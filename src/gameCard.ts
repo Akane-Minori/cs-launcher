@@ -1,7 +1,7 @@
 import { type GameEntry, type GameStatus, thumbUrl, renderFolderSize, renderRemoteSize, hideFolderSize, escapeHtml } from './api';
 import { getGameStatus, playGame, openGameFolder, uninstallGame } from './fromRust';
 import { openDetailModal } from './gameModal';
-import { isFavorite, toggleFavorite } from './localStore';
+import { isFavorite, toggleFavorite, getPlayCount, getPlayPeriod, PLAY_PERIOD_LABELS } from './localStore';
 import { isDownloading, getProgress, subscribeProgress, subscribeDone, startDownload, subscribeBegin } from './downloadState';
 
 // ----------------------------------------------------------------------------
@@ -24,6 +24,7 @@ export async function createGameCard(
   const card = document.createElement('div');
   card.className = 'game-card';
   card.dataset.gameId = game.id;
+  const period = getPlayPeriod();
   card.innerHTML = `
     <div class="game-card__thumb-wrap">
       <img class="game-card__thumb" src="${thumbUrl(game.id, game.thumbnail_path)}" ...>
@@ -35,6 +36,10 @@ export async function createGameCard(
         ${game.tags.map((t) => `<span class="game-card__tag">${escapeHtml(t)}</span>`).join('')}
       </div>
       <p class="game-card__description">${escapeHtml(game.description)}</p>
+      <div class="game-card__meta">
+        <span class="game-card__year">${game.year !== undefined ? `${escapeHtml(String(game.year))}年` : ''}</span>
+        <span class="game-card__plays">▶ ${PLAY_PERIOD_LABELS[period]} ${getPlayCount(game.id)}回</span>
+      </div>
       <div class="game-card__progress" hidden>
         <div class="game-card__progress-bar"></div>
       </div>
@@ -185,3 +190,4 @@ function makeButton(
   });
   return btn;
 }
+

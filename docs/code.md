@@ -17,24 +17,147 @@ cs-launcher
 │   └── topArea.ts
 └── src-tauri
     └── src
-        ├── commands
-        │   ├── download.rs
-        │   ├── image.rs
-        │   ├── launch.rs
-        │   ├── mod.rs
-        │   └── remote_json.rs
+        ├── commands.rs
         ├── lib.rs
         └── main.rs
 
 ```
 
-`src-tauri\src\commands\download.rs`:
+`src-tauri\src\commands.rs`:
 
 ```rs
-use super::game_dir;
+use base64::Engine;
 use futures_util::StreamExt;
+use std::path::{Path, PathBuf};
 use tauri::Emitter;
+use tauri_plugin_opener::OpenerExt;
 use tokio::io::AsyncWriteExt;
+
+// ----------------------------------------------------------------------------
+// 設定・パス
+// ----------------------------------------------------------------------------
+
+pub const API_BASE: &str = "https://cs-launcher-api.akane-minori-cslauncher.workers.dev";
+
+/// ランチャーの実行ファイルがあるフォルダ
+fn exe_dir() -> Result<PathBuf, String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    exe_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "実行ファイルのディレクトリを取得できませんでした".to_string())
+}
+
+/// ランチャーの実行ファイルと同じフォルダにある "Games" フォルダを返す
+pub fn games_root_dir() -> Result<PathBuf, String> {
+    Ok(exe_dir()?.join("Games"))
+}
+
+/// ゲームごとのダウンロード・展開先ディレクトリを返す
+pub fn game_dir(game_id: &str) -> Result<PathBuf, String> {
+    Ok(games_root_dir()?.join(game_id))
+}
+
+/// オフライン時のフォールバック用に、取得したJSONを保存しておくディレクトリ
+pub fn cache_dir() -> Result<PathBuf, String> {
+    let dir = exe_dir()?.join(".cache");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+// ----------------------------------------------------------------------------
+// URL の組み立て
+// ----------------------------------------------------------------------------
+
+/// game_id と (Games/{id}/ からの)相対パスから、Worker経由のアセットURLを組み立てる。
+/// パスの各階層ごとにURLエンコードするので、日本語ファイル名やスペースを含んでいても安全。
+pub fn build_asset_url(game_id: &str, relative_path: &str) -> Result<String, String> {
+    let mut url = reqwest::Url::parse(API_BASE).map_err(|e| e.to_string())?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "URLの構築に失敗しました".to_string())?;
+        segments.push("games").push(game_id);
+        for part in relative_path.split('/') {
+            segments.push(part);
+        }
+    }
+    Ok(url.to_string())
+}
+
+// ----------------------------------------------------------------------------
+// リモート取得(JSON・サムネイル・ファイルサイズ)
+// ----------------------------------------------------------------------------
+
+/// Cloudflare Workers経由でR2上のJSONファイルを取得する。
+/// 取得できたら .cache/ に保存し、次回オフラインだった場合はそのキャッシュを返す。
+#[tauri::command]
+pub async fn fetch_remote_json(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let url = format!("{}/{}", API_BASE, path);
+    let live_result = fetch_live(&url).await;
+
+    let cache_file = cache_dir()?.join(path.replace('/', "_"));
+
+    match live_result {
+        Ok(text) => {
+            let _ = std::fs::write(&cache_file, &text); // 保存失敗しても致命的ではないので無視
+            Ok(text)
+        }
+        Err(live_err) => match std::fs::read_to_string(&cache_file) {
+            Ok(cached) => {
+                let _ = app.emit("remote-json-fallback", path.clone());
+                Ok(cached)
+            }
+            Err(_) => Err(live_err), // キャッシュも無ければ元のエラーをそのまま返す
+        },
+    }
+}
+
+async fn fetch_live(url: &str) -> Result<String, String> {
+    let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("取得に失敗しました: {}", resp.status()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
+/// サムネイル画像をR2(Workers経由)から取得し、base64のdata URLとして返す
+#[tauri::command]
+pub async fn fetch_thumbnail_base64(game_id: String, path: String) -> Result<String, String> {
+    let url = build_asset_url(&game_id, &path)?;
+    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", content_type, b64))
+}
+
+/// ダウンロード前に、R2上のzipファイルのサイズだけをHEADリクエストで取得する
+#[tauri::command]
+pub async fn get_remote_file_size(game_id: String, path: String) -> Result<u64, String> {
+    let url = build_asset_url(&game_id, &path)?;
+    let client = reqwest::Client::new();
+    let resp = client.head(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Ok(0);
+    }
+    let size = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    Ok(size)
+}
+
+// ----------------------------------------------------------------------------
+// ダウンロード
+// ----------------------------------------------------------------------------
 
 /// R2(Cloudflare Workers経由)からゲームのzipをダウンロードし、game_dir配下に展開する
 #[tauri::command]
@@ -43,7 +166,7 @@ pub async fn download_game(
     game_id: String,
     archive_filename: String,
 ) -> Result<(), String> {
-    let url = super::build_asset_url(&game_id, &archive_filename)?;
+    let url = build_asset_url(&game_id, &archive_filename)?;
     let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("ダウンロードに失敗しました: {}", resp.status()));
@@ -55,7 +178,9 @@ pub async fn download_game(
     let archive_path = dest_dir.join("game.zip");
 
     {
-        let mut file = tokio::fs::File::create(&archive_path).await.map_err(|e| e.to_string())?;
+        let mut file = tokio::fs::File::create(&archive_path)
+            .await
+            .map_err(|e| e.to_string())?;
         let mut downloaded: u64 = 0;
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
@@ -81,58 +206,13 @@ pub async fn download_game(
     Ok(())
 }
 
-/// ダウンロード前に、R2上のzipファイルのサイズだけをHEADリクエストで取得する
-#[tauri::command]
-pub async fn get_remote_file_size(game_id: String, path: String) -> Result<u64, String> {
-    let url = super::build_asset_url(&game_id, &path)?;
-    let client = reqwest::Client::new();
-    let resp = client.head(&url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Ok(0);
-    }
-    let size = resp
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    Ok(size)
-}
-```
-`src-tauri\src\commands\image.rs`:
-
-```rs
-use base64::Engine;
-
-/// サムネイル画像をR2(Workers経由)から取得し、base64のdata URLとして返す
-#[tauri::command]
-pub async fn fetch_thumbnail_base64(game_id: String, path: String) -> Result<String, String> {
-    let url = super::build_asset_url(&game_id, &path)?;
-    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .to_string();
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(format!("data:{};base64,{}", content_type, b64))
-}
-```
-`src-tauri\src\commands\launch.rs`:
-
-```rs
-use super::{game_dir, games_root_dir};
-use tauri_plugin_opener::OpenerExt;
+// ----------------------------------------------------------------------------
+// 起動・フォルダ操作
+// ----------------------------------------------------------------------------
 
 /// ローカルにダウンロード済みのゲーム実行ファイルを起動する
 #[tauri::command]
-pub fn launch_game(
-    app: tauri::AppHandle,
-    game_id: String,
-    exe_relative_path: String,
-) -> Result<(), String> {
+pub fn launch_game(game_id: String, exe_relative_path: String) -> Result<(), String> {
     let dest_dir = game_dir(&game_id)?;
     let exe_path = dest_dir.join(&exe_relative_path);
 
@@ -147,7 +227,6 @@ pub fn launch_game(
         .current_dir(working_dir)
         .spawn()
         .map_err(|e| e.to_string())?;
-    let _ = app;
     Ok(())
 }
 
@@ -157,8 +236,18 @@ pub fn open_game_folder(app: tauri::AppHandle, game_id: String) -> Result<(), St
     let dest_dir = game_dir(&game_id)?;
     app.opener()
         .open_path(dest_dir.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
+}
+
+/// 全ゲームの保存先ルートフォルダ(ランチャー本体の隣のGames/)をエクスプローラーで開く。
+/// まだ1本もダウンロードしていない場合はフォルダを作成してから開く。
+#[tauri::command]
+pub fn open_games_root_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let games_root = games_root_dir()?;
+    std::fs::create_dir_all(&games_root).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(games_root.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 /// ゲームが既にダウンロード・展開済みかどうかを、フォルダの存在で判定する
@@ -178,27 +267,14 @@ pub fn uninstall_game(game_id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 全ゲームの保存先ルートフォルダ(ランチャー本体の隣のGames/)をエクスプローラーで開く。
-/// まだ1本もダウンロードしていない場合はフォルダを作成してから開く。
-#[tauri::command]
-pub fn open_games_root_folder(app: tauri::AppHandle) -> Result<(), String> {
-    let games_root = games_root_dir()?;
-    std::fs::create_dir_all(&games_root).map_err(|e| e.to_string())?;
-    app.opener()
-        .open_path(games_root.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 /// フォルダ内の合計サイズをバイト単位で再帰的に計算する
-fn dir_size(path: &std::path::Path) -> u64 {
+fn dir_size(path: &Path) -> u64 {
     let mut total = 0u64;
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
-            let entry_path = entry.path();
             if let Ok(metadata) = entry.metadata() {
                 if metadata.is_dir() {
-                    total += dir_size(&entry_path);
+                    total += dir_size(&entry.path());
                 } else {
                     total += metadata.len();
                 }
@@ -208,8 +284,7 @@ fn dir_size(path: &std::path::Path) -> u64 {
     total
 }
 
-/// ダウンロード済みゲームフォルダの合計サイズ(バイト)を取得する。
-/// 未ダウンロードの場合は0を返す。
+/// ダウンロード済みゲームフォルダの合計サイズ(バイト)を取得する。未ダウンロードなら0。
 #[tauri::command]
 pub fn get_game_folder_size(game_id: String) -> Result<u64, String> {
     let dest_dir = game_dir(&game_id)?;
@@ -218,96 +293,31 @@ pub fn get_game_folder_size(game_id: String) -> Result<u64, String> {
     }
     Ok(dir_size(&dest_dir))
 }
-```
-`src-tauri\src\commands\mod.rs`:
 
-```rs
-pub mod download;
-pub mod image;
-pub mod launch;
-pub mod remote_json;
+// ----------------------------------------------------------------------------
+// プレイ集計
+// ----------------------------------------------------------------------------
 
-use std::path::PathBuf;
-
-pub const API_BASE: &str = "https://cs-launcher-api.akane-minori-cslauncher.workers.dev";
-
-/// ランチャーの実行ファイルと同じフォルダにある "Games" フォルダを返す。
-pub fn games_root_dir() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| "実行ファイルのディレクトリを取得できませんでした".to_string())?;
-    Ok(exe_dir.join("Games"))
-}
-
-/// ゲームごとのダウンロード・展開先ディレクトリを返す
-pub fn game_dir(game_id: &str) -> Result<PathBuf, String> {
-    Ok(games_root_dir()?.join(game_id))
-}
-
-/// game_id と (Games/{id}/ からの)相対パスから、Worker経由のアセットURLを組み立てる。
-/// パスの各階層ごとにURLエンコードするので、日本語ファイル名やスペースを含んでいても安全。
-pub fn build_asset_url(game_id: &str, relative_path: &str) -> Result<String, String> {
-    let mut url = reqwest::Url::parse(API_BASE).map_err(|e| e.to_string())?;
-    {
-        let mut segments = url
-            .path_segments_mut()
-            .map_err(|_| "URLの構築に失敗しました".to_string())?;
-        segments.push("games").push(game_id);
-        for part in relative_path.split('/') {
-            segments.push(part);
-        }
-    }
-    Ok(url.to_string())
-}
-
-/// オフライン時のフォールバック用に、取得したJSONを保存しておくディレクトリ
-pub fn cache_dir() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| "実行ファイルのディレクトリを取得できませんでした".to_string())?;
-    let dir = exe_dir.join(".cache");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
-}
-```
-`src-tauri\src\commands\remote_json.rs`:
-
-```rs
-use tauri::Emitter;
-
-/// Cloudflare Workers経由でR2上のJSONファイルを取得する。
-/// 取得できたら .cache/ に保存し、次回オフラインだった場合はそのキャッシュを返す。
+/// プレイ回数の集計用に、ゲームIDだけをWorkerへ送る(日付はWorker側でJSTに変換される)
 #[tauri::command]
-pub async fn fetch_remote_json(app: tauri::AppHandle, path: String) -> Result<String, String> {
-    let url = format!("{}/{}", super::API_BASE, path);
-    let live_result = fetch_live(&url).await;
+pub async fn report_play(game_id: String) -> Result<(), String> {
+    let escaped = game_id.replace('\\', "\\\\").replace('"', "\\\"");
+    let body = format!("{{\"game_id\":\"{}\"}}", escaped);
 
-    let cache_file = super::cache_dir()?.join(path.replace('/', "_"));
+    let resp = reqwest::Client::new()
+        .post(format!("{}/plays", API_BASE))
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    match live_result {
-        Ok(text) => {
-            let _ = std::fs::write(&cache_file, &text); // 保存失敗しても致命的ではないので無視
-            Ok(text)
-        }
-        Err(live_err) => match std::fs::read_to_string(&cache_file) {
-            Ok(cached) => {
-                let _ = app.emit("remote-json-fallback", path.clone());
-                Ok(cached)
-            }
-            Err(_) => Err(live_err), // キャッシュも無ければ元のエラーをそのまま返す
-        },
-    }
-}
-
-async fn fetch_live(url: &str) -> Result<String, String> {
-    let resp = reqwest::get(url).await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("取得に失敗しました: {}", resp.status()));
+        return Err(format!("送信に失敗しました: {}", resp.status()));
     }
-    resp.text().await.map_err(|e| e.to_string())
+    Ok(())
 }
+
 ```
 `src-tauri\src\lib.rs`:
 
@@ -319,16 +329,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            commands::download::download_game,
-            commands::download::get_remote_file_size,
-            commands::remote_json::fetch_remote_json,
-            commands::image::fetch_thumbnail_base64,
-            commands::launch::launch_game,
-            commands::launch::open_game_folder,
-            commands::launch::is_game_downloaded,
-            commands::launch::open_games_root_folder,
-            commands::launch::uninstall_game,
-            commands::launch::get_game_folder_size,
+            commands::download_game,
+            commands::get_remote_file_size,
+            commands::fetch_remote_json,
+            commands::fetch_thumbnail_base64,
+            commands::launch_game,
+            commands::open_game_folder,
+            commands::is_game_downloaded,
+            commands::open_games_root_folder,
+            commands::uninstall_game,
+            commands::get_game_folder_size,
+            commands::report_play,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -614,6 +625,7 @@ export async function playGame(game: GameEntry): Promise<void> {
   if (game.type === 'web_link') {
     if (!game.url) throw new Error('urlが設定されていません');
     await openUrl(game.url);
+    void reportPlay(game.id);
     return;
   }
 
@@ -624,6 +636,16 @@ export async function playGame(game: GameEntry): Promise<void> {
     gameId: game.id,
     exeRelativePath: game.exe_relative_path,
   });
+  void reportPlay(game.id);
+}
+
+/** プレイ回数の集計用に、ゲームIDだけを送る。失敗してもゲーム起動は止めない */
+async function reportPlay(gameId: string): Promise<void> {
+  try {
+    await invoke('report_play', { gameId });
+  } catch {
+    // オフラインなどで失敗しても無視する
+  }
 }
 
 export async function openGameFolder(gameId: string): Promise<void> {

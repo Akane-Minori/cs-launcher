@@ -1,18 +1,24 @@
 :root {
-  --bg: #ffffff;
-  --card-bg: #fafafa;
-  --text: #1a1a1a;
-  --text-muted: #7a7a7a;
-  --accent-text: #cc0000;
-  --accent-single: #3d9fdb;
-  --border: #cccccc;
-  --border-strong: #aaaaaa;
-  --btn-grad-1: #fdfdfd;
-  --btn-grad-2: #dcdcdc;
-  --chip-bg: #ffffff;
-  --chip-border: #c4c4c4;
-  --radius: 3px;
-  --content-width: 1040px; /* niconicoの #main{width:1024px} に相当 */
+  /* 地の色 */
+  --bg: #f5f7f9;
+  --card-bg: #ffffff;
+  --text: #333333;
+  --text-muted: #6b6b6b;
+  --border: #e1e5e9;
+
+  /* 部品ごとに固定して使うカラー */
+  --c-green: #1aff1a;   /* 見出しの下線・メインボタン・選択中タブ */
+  --c-pink: #ff4d9d;    /* いいね・ゲームガチャ */
+  --c-yellow: #ffd400;  /* 選択中のチップ・フォルダボタン・すべてダウンロード */
+  --c-blue: #19c8ff;    /* タグ・ホバー・入力欄のフォーカス */
+  --c-orange: #ff8a1f;  /* 進捗バー・アンインストール */
+  --c-purple: #a855ff;  /* 選択中のページ番号・作者リンク */
+
+  --radius: 16px;
+  --radius-sm: 8px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.16);
+  --content-width: 1040px;
 }
 
 * {
@@ -27,7 +33,7 @@ body {
 
 body {
   margin: 0;
-  background: #f4f4f4;
+  background: var(--bg);
   color: var(--text);
   font-family: 'Meiryo', 'Hiragino Kaku Gothic ProN', 'MS PGothic', sans-serif;
   overflow-x: hidden;
@@ -39,7 +45,7 @@ body {
   min-height: 100vh;
 }
 
-/* 幅を固定して中央寄せ。全画面化すると左右に隙間ができる */
+/* 幅を固定して中央寄せ */
 #main {
   flex: 1;
   min-width: 0;

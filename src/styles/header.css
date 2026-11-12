@@ -10,16 +10,15 @@
   color: #ffffff;
 }
 
-/* siteheader-content(幅固定・中央寄せ)に相当。#main と同じ幅で左右を揃える */
+/* #main と同じ幅で左右を揃える */
 .header__inner {
   max-width: var(--content-width);
   margin: 0 auto;
   padding: 0 16px;
-  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 36px;
+  height: 40px;
 }
 
 .header__logo {
@@ -33,15 +32,14 @@
 
 .header__actions {
   display: flex;
-  height: 36px;
+  gap: 8px;
 }
 
 .header__action-btn {
-  height: 36px;
-  line-height: 36px;
+  height: 28px;
   padding: 0 14px;
   border: none;
-  border-left: 1px solid #666666;
+  border-radius: 14px;
   background: transparent;
   font-size: 0.8rem;
   font-weight: 700;
@@ -50,21 +48,21 @@
 }
 
 .header__action-btn:hover {
-  background: #474747;
+  background: rgba(255, 255, 255, 0.12);
 }
 
-/* final.css の .greenchar / .yellowchar と同じ配色 */
 .header__action-btn--gacha {
-  color: #39c4c1;
+  color: var(--c-pink);
+  box-shadow: inset 0 0 0 2px var(--c-pink);
 }
 
 .header__action-btn--folder {
-  color: #d9a300;
+  color: var(--c-yellow);
+  box-shadow: inset 0 0 0 2px var(--c-yellow);
 }
 
 .header__nav {
   background: #ffffff;
-  border-top: 2px solid #666666;
   border-bottom: 1px solid var(--border);
 }
 
@@ -77,21 +75,20 @@
 
 .header__nav-item {
   border: none;
+  border-bottom: 4px solid transparent;
   background: transparent;
-  color: #333333;
+  color: var(--text);
   font-size: 0.9rem;
-  padding: 8px 20px;
+  padding: 10px 20px 6px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .header__nav-item:hover {
-  background: #333333;
-  color: #ffffff;
+  border-bottom-color: var(--c-blue);
 }
 
 .header__nav-item.is-active {
-  background: #333333;
-  color: #ffffff;
+  border-bottom-color: var(--c-green);
   font-weight: 700;
 }

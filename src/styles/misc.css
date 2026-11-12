@@ -1,12 +1,12 @@
 .error {
-  color: #cc0000;
+  color: #d9002f;
   padding: 24px;
 }
 
 .offline-banner {
-  background: linear-gradient(to bottom, var(--btn-grad-1), var(--btn-grad-2));
-  border-bottom: 1px solid var(--border-strong);
-  color: var(--accent-text);
+  background: #fffbe6;
+  border-bottom: 3px solid var(--c-yellow);
+  color: var(--text);
   font-size: 0.85rem;
   font-weight: 700;
   text-align: center;
@@ -17,9 +17,8 @@
   width: 100%;
   margin-top: 8px;
   padding: 20px 24px;
-  background: #eeeeee;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
+  background: #272727;
+  color: #cccccc;
   font-size: 0.78rem;
   text-align: center;
 }

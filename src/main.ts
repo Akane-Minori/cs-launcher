@@ -1,9 +1,9 @@
-import { listCampaigns, listGames, openGamesRootFolder } from './fromRust';
+import { listCampaigns, listGames, listPlays, openGamesRootFolder } from './fromRust';
 import { renderCampaigns, renderPagination } from './listView';
 import { createGameCard } from './gameCard';
 import { renderHeader, renderTopBar, type ViewType } from './topArea';
 import { openDetailModal } from './gameModal';
-import { getFavoriteIds, getRecentlyPlayedIds } from './localStore';
+import { getFavoriteIds, getRecentlyPlayedIds, setPlayPeriod, setPlayRows, sortGames, type PlayPeriod, type PlayRow, type SortKey } from './localStore';
 import type { Campaign, GameEntry } from './api';
 import './styles.css';
 import { listen } from '@tauri-apps/api/event';
@@ -18,6 +18,9 @@ let activeTag: string | null = null;
 let activeAuthor: string | null = null;
 let titleQuery = '';
 let currentPage = 1;
+let activeYear: number | null = null;
+let sortKey: SortKey = 'default';
+let playPeriod: PlayPeriod = 'all';
 
 async function init() {
   const appEl = document.querySelector<HTMLElement>('#app');
@@ -68,7 +71,10 @@ async function init() {
   renderHeader(headerEl, activeView, handleNavigate, handleOpenGamesFolder, handleGacha);
 
   try {
-    allGames = await listGames();
+    // プレイ回数が取れなくても、ゲーム一覧は出す
+    const [games, plays] = await Promise.all([listGames(), listPlays().catch(() => [] as PlayRow[])]);
+    allGames = games;
+    setPlayRows(plays);
     await renderContent();
   } catch (err) {
     gridEl.innerHTML = `<p class="error">ゲーム一覧の取得に失敗しました: ${err}</p>`;
@@ -78,6 +84,7 @@ async function init() {
   async function handleNavigate(view: ViewType) {
     activeView = view;
     activeTag = null;
+    activeYear = null;
     activeAuthor = null;
     currentPage = 1;
     renderHeader(headerEl!, activeView, handleNavigate, handleOpenGamesFolder, handleGacha);
@@ -126,6 +133,24 @@ async function init() {
   async function handleTitleQueryChange(query: string) {
     titleQuery = query;
     currentPage = 1;
+    await renderContent();
+  }
+
+  async function handleYearClick(year: number | null) {
+    activeYear = year;
+    currentPage = 1;
+    await renderContent();
+  }
+
+  async function handleSortChange(key: SortKey) {
+    sortKey = key;
+    currentPage = 1;
+    await renderContent();
+  }
+
+  async function handlePeriodChange(period: PlayPeriod) {
+    playPeriod = period;
+    setPlayPeriod(period); // カードに出す回数の期間
     await renderContent();
   }
 
@@ -179,6 +204,11 @@ async function init() {
       );
     }
 
+    if (activeYear !== null) {
+      visibleGames = visibleGames.filter((g) => g.year === activeYear);
+    }
+    visibleGames = sortGames(visibleGames, sortKey);
+
     const totalPages = Math.max(1, Math.ceil(visibleGames.length / PAGE_SIZE));
     if (currentPage > totalPages) currentPage = totalPages;
     const pagedGames = visibleGames.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -187,7 +217,22 @@ async function init() {
     const wasTitleInputFocused = activeEl?.classList.contains('top-bar__title-search') ?? false;
     const caret = wasTitleInputFocused ? activeEl!.selectionStart : null;
 
-    renderTopBar(topBarEl!, baseGames, activeTag, activeAuthor, titleQuery, handleTagClick, handleAuthorClick, handleTitleQueryChange);
+    renderTopBar(
+      topBarEl!,
+      baseGames,
+      activeTag,
+      activeAuthor,
+      titleQuery,
+      handleTagClick,
+      handleAuthorClick,
+      handleTitleQueryChange,
+      activeYear,
+      sortKey,
+      playPeriod,
+      handleYearClick,
+      handleSortChange,
+      handlePeriodChange
+    );
 
     if (wasTitleInputFocused) {
       const input = topBarEl!.querySelector<HTMLInputElement>('.top-bar__title-search');

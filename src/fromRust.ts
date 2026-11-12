@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Campaign, GameEntry, GameStatus } from './api';
-import { recordPlay } from './localStore';
+import { bumpPlay, recordPlay, type PlayRow } from './localStore';
 
 
 export async function listGames(): Promise<GameEntry[]> {
@@ -12,6 +12,12 @@ export async function listGames(): Promise<GameEntry[]> {
 
 export async function listCampaigns(): Promise<Campaign[]> {
   const text = await invoke<string>('fetch_remote_json', { path: 'campaigns.json' });
+  return JSON.parse(text);
+}
+
+/** プレイ回数(日付ごとの行)を取得する */
+export async function listPlays(): Promise<PlayRow[]> {
+  const text = await invoke<string>('fetch_remote_json', { path: 'plays' });
   return JSON.parse(text);
 }
 
@@ -53,6 +59,7 @@ export async function playGame(game: GameEntry): Promise<void> {
   if (game.type === 'web_link') {
     if (!game.url) throw new Error('urlが設定されていません');
     await openUrl(game.url);
+    void reportPlay(game.id);
     return;
   }
 
@@ -63,6 +70,17 @@ export async function playGame(game: GameEntry): Promise<void> {
     gameId: game.id,
     exeRelativePath: game.exe_relative_path,
   });
+  void reportPlay(game.id);
+}
+
+/** プレイ回数の集計用に、ゲームIDだけを送る。失敗してもゲーム起動は止めない */
+async function reportPlay(gameId: string): Promise<void> {
+  try {
+    await invoke('report_play', { gameId });
+    bumpPlay(gameId);
+  } catch {
+    // オフラインなどで失敗しても無視する
+  }
 }
 
 export async function openGameFolder(gameId: string): Promise<void> {

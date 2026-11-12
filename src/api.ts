@@ -22,6 +22,10 @@ export interface GameEntry {
   thumbnail_path: string;
   screenshot_paths?: string[];
   authors?: string[];
+  year?: number; // 制作した年
+  created_at?: string; // 登録日 YYYY-MM-DD
+  updated_at?: string; // 更新日 YYYY-MM-DD
+  version?: string; // download のみ
 
   // type: "download" のときに使う
   archive_filename?: string;
@@ -111,3 +115,4 @@ export function escapeHtml(text: string): string {
   div.textContent = text;
   return div.innerHTML.replace(/"/g, '&quot;');
 }
+

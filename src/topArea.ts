@@ -1,4 +1,5 @@
 import { type GameEntry, escapeHtml } from './api';
+import { PLAY_PERIODS, PLAY_PERIOD_LABELS, SORT_OPTIONS, type PlayPeriod, type SortKey } from './localStore';
 
 // ----------------------------------------------------------------------------
 // ヘッダー(タブとボタン)
@@ -53,7 +54,13 @@ export function renderTopBar(
   titleQuery: string,
   onTagClick: (tag: string | null) => void,
   onAuthorClick: (author: string | null) => void,
-  onTitleQueryChange: (query: string) => void
+  onTitleQueryChange: (query: string) => void,
+  activeYear: number | null,
+  sortKey: SortKey,
+  period: PlayPeriod,
+  onYearClick: (year: number | null) => void,
+  onSortChange: (key: SortKey) => void,
+  onPeriodChange: (period: PlayPeriod) => void
 ) {
   const tagCounts = new Map<string, number>();
   const authorCounts = new Map<string, number>();
@@ -66,6 +73,12 @@ export function renderTopBar(
       authorCounts.set(author, (authorCounts.get(author) ?? 0) + 1);
     }
   }
+  const yearCounts = new Map<number, number>();
+  for (const game of games) {
+    if (game.year !== undefined) yearCounts.set(game.year, (yearCounts.get(game.year) ?? 0) + 1);
+  }
+  const years = [...yearCounts.entries()].sort((a, b) => b[0] - a[0]); // 新しい年が先頭
+
   const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]);
   if (activeTag) {
     const idx = tags.findIndex(([t]) => t === activeTag);
@@ -85,13 +98,37 @@ export function renderTopBar(
   container.innerHTML = `
     <div class="top-bar__row">
       <div class="top-bar__count">${games.length}件のゲーム</div>
-      <input
-        class="top-bar__title-search"
-        type="text"
-        placeholder="タイトル・説明で検索"
-        value="${escapeAttr(titleQuery)}"
-      >
+      <div class="top-bar__controls">
+        <select class="top-bar__select" id="sort-select" aria-label="並び替え">
+          ${SORT_OPTIONS.map((o) => `<option value="${o.key}"${o.key === sortKey ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+        </select>
+        <select class="top-bar__select" id="period-select" aria-label="プレイ回数の期間">
+          ${PLAY_PERIODS.map((p) => `<option value="${p}"${p === period ? ' selected' : ''}>プレイ回数: ${PLAY_PERIOD_LABELS[p]}</option>`).join('')}
+        </select>
+        <input
+          class="top-bar__title-search"
+          type="text"
+          placeholder="タイトル・説明で検索"
+          value="${escapeAttr(titleQuery)}"
+        >
+      </div>
     </div>
+    ${
+      years.length > 0
+        ? `
+      <div class="top-bar__section-label">年</div>
+      <div class="top-bar__chips">
+        ${years
+          .map(
+            ([year, count]) => `
+          <button class="top-bar__chip${year === activeYear ? ' is-active' : ''}" data-year="${year}" type="button">
+            ${year} <span class="top-bar__chip-count">${count}</span>
+          </button>`
+          )
+          .join('')}
+      </div>`
+        : ''
+    }
     ${
       tags.length > 0
         ? `
@@ -138,6 +175,20 @@ export function renderTopBar(
     });
   });
 
+  container.querySelectorAll<HTMLButtonElement>('.top-bar__chip[data-year]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const year = Number(btn.dataset.year);
+      onYearClick(year === activeYear ? null : year);
+    });
+  });
+
+  container.querySelector<HTMLSelectElement>('#sort-select')!.addEventListener('change', (e) => {
+    onSortChange((e.target as HTMLSelectElement).value as SortKey);
+  });
+  container.querySelector<HTMLSelectElement>('#period-select')!.addEventListener('change', (e) => {
+    onPeriodChange((e.target as HTMLSelectElement).value as PlayPeriod);
+  });
+
   const titleInput = container.querySelector<HTMLInputElement>('.top-bar__title-search')!;
   titleInput.addEventListener('input', (e) => {
     // IME変換中(isComposing)はここでは反映しない。再描画すると変換状態が壊れるため。
@@ -153,3 +204,4 @@ export function renderTopBar(
 function escapeAttr(text: string): string {
   return escapeHtml(text);
 }
+
