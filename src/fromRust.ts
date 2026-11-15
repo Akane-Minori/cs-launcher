@@ -26,6 +26,11 @@ export async function getGameStatus(gameId: string): Promise<GameStatus> {
   return downloaded ? 'downloaded' : 'not_downloaded';
 }
 
+/** 端末に入っているゲームの版を返す。記録が無ければ null */
+export async function getInstalledVersion(gameId: string): Promise<string | null> {
+  return invoke<string | null>('get_installed_version', { gameId });
+}
+
 /**
  * ゲーム本体をダウンロード・展開する。
  * onProgress は download-progress イベントを受け取るたびに呼ばれる。
@@ -43,6 +48,7 @@ export async function downloadGame(
     await invoke('download_game', {
       gameId: game.id,
       archiveFilename: game.archive_filename ?? 'game.zip',
+      version: game.version ?? '',
     });
   } finally {
     unlisten();
@@ -108,4 +114,57 @@ export async function getGameFolderSize(gameId: string): Promise<number> {
 
 export async function getRemoteFileSize(gameId: string, path: string): Promise<number> {
   return invoke<number>('get_remote_file_size', { gameId, path });
+}
+
+// ----------------------------------------------------------------------------
+// ランチャー本体の自己アップデート
+// ----------------------------------------------------------------------------
+
+export interface LauncherUpdate {
+  current: string; // 今動いている版
+  latest: string; // R2 にある新しい版
+  filename: string; // launcher/ 配下の新exeのファイル名
+}
+
+/** "0.2.0" のような版を数字ごとに比べ、latest が current より新しいかを返す */
+function isNewerVersion(latest: string, current: string): boolean {
+  const a = latest.split('.').map((n) => parseInt(n, 10) || 0);
+  const b = current.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+/** launcher/version.json を見て、今の版より新しければ情報を返す。新しくなければ null */
+export async function checkLauncherUpdate(): Promise<LauncherUpdate | null> {
+  const [current, text] = await Promise.all([
+    invoke<string>('get_launcher_version'),
+    invoke<string>('fetch_remote_json', { path: 'launcher/version.json' }),
+  ]);
+  const data = JSON.parse(text) as { version?: string; filename?: string };
+  if (!data.version || !data.filename) return null;
+  if (!isNewerVersion(data.version, current)) return null;
+  return { current, latest: data.version, filename: data.filename };
+}
+
+/**
+ * 新しいランチャーをダウンロードして差し替え、再起動する。
+ * 成功するとアプリが終了するので、この関数は通常戻ってこない。
+ */
+export async function selfUpdate(
+  filename: string,
+  onProgress: (downloaded: number, total: number) => void
+): Promise<void> {
+  const unlisten = await listen<[number, number]>('self-update-progress', (event) => {
+    const [downloaded, total] = event.payload;
+    onProgress(downloaded, total);
+  });
+  try {
+    await invoke('self_update', { filename });
+  } finally {
+    unlisten();
+  }
 }

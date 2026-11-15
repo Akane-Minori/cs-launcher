@@ -383,6 +383,10 @@ export interface GameEntry {
   thumbnail_path: string;
   screenshot_paths?: string[];
   authors?: string[];
+  year?: number; // 制作した年
+  created_at?: string; // 登録日 YYYY-MM-DD
+  updated_at?: string; // 更新日 YYYY-MM-DD
+  version?: string; // download のみ
 
   // type: "download" のときに使う
   archive_filename?: string;
@@ -472,6 +476,7 @@ export function escapeHtml(text: string): string {
   div.textContent = text;
   return div.innerHTML.replace(/"/g, '&quot;');
 }
+
 
 ```
 `src\downloadState.ts`:
@@ -574,7 +579,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Campaign, GameEntry, GameStatus } from './api';
-import { recordPlay } from './localStore';
+import { bumpPlay, recordPlay, type PlayRow } from './localStore';
 
 
 export async function listGames(): Promise<GameEntry[]> {
@@ -584,6 +589,12 @@ export async function listGames(): Promise<GameEntry[]> {
 
 export async function listCampaigns(): Promise<Campaign[]> {
   const text = await invoke<string>('fetch_remote_json', { path: 'campaigns.json' });
+  return JSON.parse(text);
+}
+
+/** プレイ回数(日付ごとの行)を取得する */
+export async function listPlays(): Promise<PlayRow[]> {
+  const text = await invoke<string>('fetch_remote_json', { path: 'plays' });
   return JSON.parse(text);
 }
 
@@ -643,6 +654,7 @@ export async function playGame(game: GameEntry): Promise<void> {
 async function reportPlay(gameId: string): Promise<void> {
   try {
     await invoke('report_play', { gameId });
+    bumpPlay(gameId);
   } catch {
     // オフラインなどで失敗しても無視する
   }
@@ -674,6 +686,7 @@ export async function getGameFolderSize(gameId: string): Promise<number> {
 export async function getRemoteFileSize(gameId: string, path: string): Promise<number> {
   return invoke<number>('get_remote_file_size', { gameId, path });
 }
+
 ```
 `src\gameCard.ts`:
 
@@ -681,7 +694,7 @@ export async function getRemoteFileSize(gameId: string, path: string): Promise<n
 import { type GameEntry, type GameStatus, thumbUrl, renderFolderSize, renderRemoteSize, hideFolderSize, escapeHtml } from './api';
 import { getGameStatus, playGame, openGameFolder, uninstallGame } from './fromRust';
 import { openDetailModal } from './gameModal';
-import { isFavorite, toggleFavorite } from './localStore';
+import { isFavorite, toggleFavorite, getPlayCount } from './localStore';
 import { isDownloading, getProgress, subscribeProgress, subscribeDone, startDownload, subscribeBegin } from './downloadState';
 
 // ----------------------------------------------------------------------------
@@ -706,7 +719,7 @@ export async function createGameCard(
   card.dataset.gameId = game.id;
   card.innerHTML = `
     <div class="game-card__thumb-wrap">
-      <img class="game-card__thumb" src="${thumbUrl(game.id, game.thumbnail_path)}" ...>
+      <img class="game-card__thumb" src="${thumbUrl(game.id, game.thumbnail_path)}" alt="${escapeHtml(game.title)}">
       <button class="game-card__favorite${isFavorite(game.id) ? ' is-active' : ''}" type="button" aria-label="いいね">♥</button>
     </div>
     <div class="game-card__body">
@@ -715,6 +728,10 @@ export async function createGameCard(
         ${game.tags.map((t) => `<span class="game-card__tag">${escapeHtml(t)}</span>`).join('')}
       </div>
       <p class="game-card__description">${escapeHtml(game.description)}</p>
+      <div class="game-card__meta">
+        <span class="game-card__year">${game.year !== undefined ? `${escapeHtml(String(game.year))}年` : ''}</span>
+        <span class="game-card__plays">▶ ${getPlayCount(game.id)}</span>
+      </div>
       <div class="game-card__progress" hidden>
         <div class="game-card__progress-bar"></div>
       </div>
@@ -872,7 +889,7 @@ function makeButton(
 ```ts
 import { type GameEntry, type GameStatus, thumbUrl, renderFolderSize, renderRemoteSize, hideFolderSize, escapeHtml } from './api';
 import { getGameStatus, fetchThumbnailDataUrl } from './fromRust';
-import { isFavorite, toggleFavorite, getNote, setNote } from './localStore';
+import { isFavorite, toggleFavorite, getNote, setNote, getPlayCount } from './localStore';
 import { renderGameActions } from './gameCard';
 import { isDownloading } from './downloadState';
 
@@ -926,6 +943,7 @@ export function openDetailModal(
                 .join(', ')
             : '不明'
         }</p>
+        <p class="modal__plays">▶ ${getPlayCount(game.id)}回</p>
         <p class="modal__size" id="modal-size" hidden></p>
 
         <div class="modal__progress" hidden>
@@ -1322,6 +1340,8 @@ function buildPageList(current: number, total: number): (number | '...')[] {
 `src\localStore.ts`:
 
 ```ts
+import type { GameEntry } from './api';
+
 // ----------------------------------------------------------------------------
 // 共通: localStorage の読み書き
 // ----------------------------------------------------------------------------
@@ -1419,16 +1439,148 @@ export function getRecentlyPlayedIds(limit?: number): string[] {
   return limit ? ids.slice(0, limit) : ids;
 }
 
+// ----------------------------------------------------------------------------
+// プレイ回数(/plays の行を、ゲームごと・期間ごとに合計する)
+// ----------------------------------------------------------------------------
+
+export type PlayPeriod = 'all' | 'month' | 'today';
+
+export const PLAY_PERIODS: PlayPeriod[] = ['all', 'month', 'today'];
+
+export const PLAY_PERIOD_LABELS: Record<PlayPeriod, string> = {
+  all: '全期間',
+  month: '1ヶ月',
+  today: '今日',
+};
+
+export interface PlayRow {
+  date: string; // 'YYYY-MM-DD'(JST)
+  game_id: string;
+  count: number;
+}
+
+export interface PlayCount {
+  all: number;
+  month: number;
+  today: number;
+}
+
+const EMPTY: PlayCount = { all: 0, month: 0, today: 0 };
+
+let counts = new Map<string, PlayCount>();
+let period: PlayPeriod = 'all';
+
+/** JST の日付 'YYYY-MM-DD'(Worker 側の集計と同じ基準)。offsetDays で前後にずらす */
+function jstDate(offsetDays = 0): string {
+  const t = Date.now() + 9 * 60 * 60 * 1000 + offsetDays * 24 * 60 * 60 * 1000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+export function setPlayRows(rows: PlayRow[]): void {
+  const today = jstDate();
+  const monthStart = jstDate(-29); // 今日を含む30日間
+  const next = new Map<string, PlayCount>();
+  for (const r of rows) {
+    const c = next.get(r.game_id) ?? { all: 0, month: 0, today: 0 };
+    c.all += r.count;
+    if (r.date >= monthStart) c.month += r.count;
+    if (r.date === today) c.today += r.count;
+    next.set(r.game_id, c);
+  }
+  counts = next;
+}
+
+export function getPlayCounts(gameId: string): PlayCount {
+  return counts.get(gameId) ?? EMPTY;
+}
+
+export function getPlayCount(gameId: string, p: PlayPeriod = period): number {
+  return getPlayCounts(gameId)[p];
+}
+
+/** このPCで遊んだ分を、画面に出す回数にもすぐ足す(サーバーの集計は最大1分遅れるため) */
+export function bumpPlay(gameId: string): void {
+  const c = counts.get(gameId) ?? { all: 0, month: 0, today: 0 };
+  c.all++;
+  c.month++;
+  c.today++;
+  counts.set(gameId, c);
+}
+
+export function getPlayPeriod(): PlayPeriod {
+  return period;
+}
+
+export function setPlayPeriod(p: PlayPeriod): void {
+  period = p;
+}
+
+// ----------------------------------------------------------------------------
+// 並び替え
+// ----------------------------------------------------------------------------
+
+export type SortKey = 'default' | 'created' | 'updated' | 'year_desc' | 'year_asc' | 'plays';
+
+export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'default', label: '標準' },
+  { key: 'created', label: '新しい順(登録日)' },
+  { key: 'updated', label: '更新順' },
+  { key: 'year_desc', label: '年度順(新しい順)' },
+  { key: 'year_asc', label: '年度順(古い順)' },
+  { key: 'plays', label: 'プレイ回数順' },
+];
+
+/** 日付の文字列を新しい順に。値が無いものは最後に回す */
+function dateDesc(a?: string, b?: string): number {
+  if (a === b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return a < b ? 1 : -1;
+}
+
+/** 数値の比較。値が無いものは最後に回す */
+function numCmp(a: number | undefined, b: number | undefined, desc: boolean): number {
+  if (a === b) return 0;
+  if (a === undefined) return 1;
+  if (b === undefined) return -1;
+  return desc ? b - a : a - b;
+}
+
+/** 並び替えた新しい配列を返す。同じ値のものは元の順番を保つ。'default' は何もしない */
+export function sortGames(games: GameEntry[], key: SortKey): GameEntry[] {
+  if (key === 'default') return games;
+
+  const compare = (a: GameEntry, b: GameEntry): number => {
+    switch (key) {
+      case 'created':
+        return dateDesc(a.created_at, b.created_at);
+      case 'updated':
+        return dateDesc(a.updated_at, b.updated_at) || dateDesc(a.created_at, b.created_at);
+      case 'year_desc':
+        return numCmp(a.year, b.year, true) || dateDesc(a.created_at, b.created_at);
+      case 'year_asc':
+        return numCmp(a.year, b.year, false) || dateDesc(a.created_at, b.created_at);
+      case 'plays':
+        return getPlayCount(b.id) - getPlayCount(a.id);
+    }
+  };
+
+  return games
+    .map((game, index) => ({ game, index }))
+    .sort((x, y) => compare(x.game, y.game) || x.index - y.index)
+    .map((x) => x.game);
+}
+
 ```
 `src\main.ts`:
 
 ```ts
-import { listCampaigns, listGames, openGamesRootFolder } from './fromRust';
+import { listCampaigns, listGames, listPlays, openGamesRootFolder } from './fromRust';
 import { renderCampaigns, renderPagination } from './listView';
 import { createGameCard } from './gameCard';
 import { renderHeader, renderTopBar, type ViewType } from './topArea';
 import { openDetailModal } from './gameModal';
-import { getFavoriteIds, getRecentlyPlayedIds } from './localStore';
+import { getFavoriteIds, getRecentlyPlayedIds, setPlayPeriod, setPlayRows, sortGames, type PlayPeriod, type PlayRow, type SortKey } from './localStore';
 import type { Campaign, GameEntry } from './api';
 import './styles.css';
 import { listen } from '@tauri-apps/api/event';
@@ -1443,6 +1595,9 @@ let activeTag: string | null = null;
 let activeAuthor: string | null = null;
 let titleQuery = '';
 let currentPage = 1;
+let activeYear: number | null = null;
+let sortKey: SortKey = 'default';
+let playPeriod: PlayPeriod = 'all';
 
 async function init() {
   const appEl = document.querySelector<HTMLElement>('#app');
@@ -1493,7 +1648,10 @@ async function init() {
   renderHeader(headerEl, activeView, handleNavigate, handleOpenGamesFolder, handleGacha);
 
   try {
-    allGames = await listGames();
+    // プレイ回数が取れなくても、ゲーム一覧は出す
+    const [games, plays] = await Promise.all([listGames(), listPlays().catch(() => [] as PlayRow[])]);
+    allGames = games;
+    setPlayRows(plays);
     await renderContent();
   } catch (err) {
     gridEl.innerHTML = `<p class="error">ゲーム一覧の取得に失敗しました: ${err}</p>`;
@@ -1503,6 +1661,7 @@ async function init() {
   async function handleNavigate(view: ViewType) {
     activeView = view;
     activeTag = null;
+    activeYear = null;
     activeAuthor = null;
     currentPage = 1;
     renderHeader(headerEl!, activeView, handleNavigate, handleOpenGamesFolder, handleGacha);
@@ -1551,6 +1710,24 @@ async function init() {
   async function handleTitleQueryChange(query: string) {
     titleQuery = query;
     currentPage = 1;
+    await renderContent();
+  }
+
+  async function handleYearClick(year: number | null) {
+    activeYear = year;
+    currentPage = 1;
+    await renderContent();
+  }
+
+  async function handleSortChange(key: SortKey) {
+    sortKey = key;
+    currentPage = 1;
+    await renderContent();
+  }
+
+  async function handlePeriodChange(period: PlayPeriod) {
+    playPeriod = period;
+    setPlayPeriod(period); // カードに出す回数の期間
     await renderContent();
   }
 
@@ -1604,6 +1781,11 @@ async function init() {
       );
     }
 
+    if (activeYear !== null) {
+      visibleGames = visibleGames.filter((g) => g.year === activeYear);
+    }
+    visibleGames = sortGames(visibleGames, sortKey);
+
     const totalPages = Math.max(1, Math.ceil(visibleGames.length / PAGE_SIZE));
     if (currentPage > totalPages) currentPage = totalPages;
     const pagedGames = visibleGames.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -1612,7 +1794,22 @@ async function init() {
     const wasTitleInputFocused = activeEl?.classList.contains('top-bar__title-search') ?? false;
     const caret = wasTitleInputFocused ? activeEl!.selectionStart : null;
 
-    renderTopBar(topBarEl!, baseGames, activeTag, activeAuthor, titleQuery, handleTagClick, handleAuthorClick, handleTitleQueryChange);
+    renderTopBar(
+      topBarEl!,
+      baseGames,
+      activeTag,
+      activeAuthor,
+      titleQuery,
+      handleTagClick,
+      handleAuthorClick,
+      handleTitleQueryChange,
+      activeYear,
+      sortKey,
+      playPeriod,
+      handleYearClick,
+      handleSortChange,
+      handlePeriodChange
+    );
 
     if (wasTitleInputFocused) {
       const input = topBarEl!.querySelector<HTMLInputElement>('.top-bar__title-search');
@@ -1644,11 +1841,13 @@ async function init() {
 }
 
 window.addEventListener('DOMContentLoaded', init);
+
 ```
 `src\topArea.ts`:
 
 ```ts
 import { type GameEntry, escapeHtml } from './api';
+import { PLAY_PERIODS, PLAY_PERIOD_LABELS, SORT_OPTIONS, type PlayPeriod, type SortKey } from './localStore';
 
 // ----------------------------------------------------------------------------
 // ヘッダー(タブとボタン)
@@ -1703,7 +1902,13 @@ export function renderTopBar(
   titleQuery: string,
   onTagClick: (tag: string | null) => void,
   onAuthorClick: (author: string | null) => void,
-  onTitleQueryChange: (query: string) => void
+  onTitleQueryChange: (query: string) => void,
+  activeYear: number | null,
+  sortKey: SortKey,
+  period: PlayPeriod,
+  onYearClick: (year: number | null) => void,
+  onSortChange: (key: SortKey) => void,
+  onPeriodChange: (period: PlayPeriod) => void
 ) {
   const tagCounts = new Map<string, number>();
   const authorCounts = new Map<string, number>();
@@ -1716,6 +1921,12 @@ export function renderTopBar(
       authorCounts.set(author, (authorCounts.get(author) ?? 0) + 1);
     }
   }
+  const yearCounts = new Map<number, number>();
+  for (const game of games) {
+    if (game.year !== undefined) yearCounts.set(game.year, (yearCounts.get(game.year) ?? 0) + 1);
+  }
+  const years = [...yearCounts.entries()].sort((a, b) => b[0] - a[0]); // 新しい年が先頭
+
   const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]);
   if (activeTag) {
     const idx = tags.findIndex(([t]) => t === activeTag);
@@ -1735,13 +1946,37 @@ export function renderTopBar(
   container.innerHTML = `
     <div class="top-bar__row">
       <div class="top-bar__count">${games.length}件のゲーム</div>
-      <input
-        class="top-bar__title-search"
-        type="text"
-        placeholder="タイトル・説明で検索"
-        value="${escapeAttr(titleQuery)}"
-      >
+      <div class="top-bar__controls">
+        <select class="top-bar__select" id="sort-select" aria-label="並び替え">
+          ${SORT_OPTIONS.map((o) => `<option value="${o.key}"${o.key === sortKey ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}
+        </select>
+        <select class="top-bar__select" id="period-select" aria-label="プレイ回数の期間">
+          ${PLAY_PERIODS.map((p) => `<option value="${p}"${p === period ? ' selected' : ''}>プレイ回数: ${PLAY_PERIOD_LABELS[p]}</option>`).join('')}
+        </select>
+        <input
+          class="top-bar__title-search"
+          type="text"
+          placeholder="タイトル・説明で検索"
+          value="${escapeAttr(titleQuery)}"
+        >
+      </div>
     </div>
+    ${
+      years.length > 0
+        ? `
+      <div class="top-bar__section-label">年</div>
+      <div class="top-bar__chips">
+        ${years
+          .map(
+            ([year, count]) => `
+          <button class="top-bar__chip${year === activeYear ? ' is-active' : ''}" data-year="${year}" type="button">
+            ${year} <span class="top-bar__chip-count">${count}</span>
+          </button>`
+          )
+          .join('')}
+      </div>`
+        : ''
+    }
     ${
       tags.length > 0
         ? `
@@ -1788,6 +2023,20 @@ export function renderTopBar(
     });
   });
 
+  container.querySelectorAll<HTMLButtonElement>('.top-bar__chip[data-year]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const year = Number(btn.dataset.year);
+      onYearClick(year === activeYear ? null : year);
+    });
+  });
+
+  container.querySelector<HTMLSelectElement>('#sort-select')!.addEventListener('change', (e) => {
+    onSortChange((e.target as HTMLSelectElement).value as SortKey);
+  });
+  container.querySelector<HTMLSelectElement>('#period-select')!.addEventListener('change', (e) => {
+    onPeriodChange((e.target as HTMLSelectElement).value as PlayPeriod);
+  });
+
   const titleInput = container.querySelector<HTMLInputElement>('.top-bar__title-search')!;
   titleInput.addEventListener('input', (e) => {
     // IME変換中(isComposing)はここでは反映しない。再描画すると変換状態が壊れるため。
@@ -1803,5 +2052,6 @@ export function renderTopBar(
 function escapeAttr(text: string): string {
   return escapeHtml(text);
 }
+
 
 ```

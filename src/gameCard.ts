@@ -1,8 +1,32 @@
 import { type GameEntry, type GameStatus, thumbUrl, renderFolderSize, renderRemoteSize, hideFolderSize, escapeHtml } from './api';
-import { getGameStatus, playGame, openGameFolder, uninstallGame } from './fromRust';
+import { getGameStatus, getInstalledVersion, playGame, openGameFolder, uninstallGame } from './fromRust';
 import { openDetailModal } from './gameModal';
-import { isFavorite, toggleFavorite, getPlayCount, getPlayPeriod, PLAY_PERIOD_LABELS } from './localStore';
+import { isFavorite, toggleFavorite, getPlayCount } from './localStore';
 import { isDownloading, getProgress, subscribeProgress, subscribeDone, startDownload, subscribeBegin } from './downloadState';
+
+// ----------------------------------------------------------------------------
+// アップデート判定
+// ----------------------------------------------------------------------------
+
+export interface UpdateInfo {
+  installed: string;
+  latest: string;
+}
+
+/**
+ * 端末の版(.installed.json)と games.json の版を文字列で比べる。
+ * 版が違えば UpdateInfo を返す。対象外・同じ版・版の記録なしの場合は null。
+ */
+export async function getUpdateInfo(game: GameEntry): Promise<UpdateInfo | null> {
+  if (game.type !== 'download' || !game.version) return null;
+  try {
+    const installed = await getInstalledVersion(game.id);
+    if (installed === null || installed === game.version) return null;
+    return { installed, latest: game.version };
+  } catch {
+    return null;
+  }
+}
 
 // ----------------------------------------------------------------------------
 // ゲームカード
@@ -24,10 +48,9 @@ export async function createGameCard(
   const card = document.createElement('div');
   card.className = 'game-card';
   card.dataset.gameId = game.id;
-  const period = getPlayPeriod();
   card.innerHTML = `
     <div class="game-card__thumb-wrap">
-      <img class="game-card__thumb" src="${thumbUrl(game.id, game.thumbnail_path)}" ...>
+      <img class="game-card__thumb" src="${thumbUrl(game.id, game.thumbnail_path)}" alt="${escapeHtml(game.title)}">
       <button class="game-card__favorite${isFavorite(game.id) ? ' is-active' : ''}" type="button" aria-label="いいね">♥</button>
     </div>
     <div class="game-card__body">
@@ -38,7 +61,7 @@ export async function createGameCard(
       <p class="game-card__description">${escapeHtml(game.description)}</p>
       <div class="game-card__meta">
         <span class="game-card__year">${game.year !== undefined ? `${escapeHtml(String(game.year))}年` : ''}</span>
-        <span class="game-card__plays">▶ ${PLAY_PERIOD_LABELS[period]} ${getPlayCount(game.id)}回</span>
+        <span class="game-card__plays">▶ ${getPlayCount(game.id)}</span>
       </div>
       <div class="game-card__progress" hidden>
         <div class="game-card__progress-bar"></div>
@@ -50,7 +73,8 @@ export async function createGameCard(
     </div>
   `;
 
-  function updateActions(s: GameStatus) {
+  async function updateActions(s: GameStatus) {
+    const update = s === 'downloaded' ? await getUpdateInfo(game) : null;
     renderGameActions(
       {
         actionsEl: card.querySelector<HTMLElement>('.game-card__actions')!,
@@ -59,7 +83,8 @@ export async function createGameCard(
       },
       game,
       s,
-      updateActions
+      updateActions,
+      update
     );
     const sizeEl = card.querySelector<HTMLElement>('.game-card__size')!;
     if (game.type === 'web_link') {
@@ -72,7 +97,7 @@ export async function createGameCard(
       hideFolderSize(sizeEl);
     }
   }
-  updateActions(status);
+  await updateActions(status);
 
   const favBtn = card.querySelector<HTMLButtonElement>('.game-card__favorite')!;
   favBtn.addEventListener('click', (e) => {
@@ -105,7 +130,8 @@ export function renderGameActions(
   els: ActionsElements,
   game: GameEntry,
   status: GameStatus,
-  onStatusChange: (status: GameStatus) => void
+  onStatusChange: (status: GameStatus) => void,
+  update?: UpdateInfo | null
 ) {
   const { actionsEl, progressWrapEl, progressBarEl } = els;
   actionsEl.innerHTML = '';
@@ -147,6 +173,23 @@ export function renderGameActions(
       onStatusChange(result.success ? 'downloaded' : 'not_downloaded');
     });
   } else if (status === 'downloaded') {
+    if (update) {
+      // 確認ダイアログでキャンセルされたら begin は呼ばれないので、購読は解除して元の表示に戻す
+      const unsubBegin = subscribeBegin(game.id, () => {
+        unsubBegin();
+        onStatusChange('downloading');
+      });
+      actionsEl.appendChild(
+        makeButton(`アップデート(v${update.installed} → v${update.latest})`, async (btn) => {
+          btn.disabled = true;
+          const success = await startDownload(game);
+          if (!success) {
+            unsubBegin();
+            onStatusChange(await getGameStatus(game.id));
+          }
+        })
+      );
+    }
     actionsEl.appendChild(makeButton('プレイ', () => playGame(game)));
     actionsEl.appendChild(makeButton('フォルダを開く', () => openGameFolder(game.id)));
     actionsEl.appendChild(
@@ -190,4 +233,3 @@ function makeButton(
   });
   return btn;
 }
-

@@ -341,6 +341,23 @@ body {
   color: var(--c-pink);
 }
 
+/* 年・プレイ回数 */
+.game-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.game-card__plays {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 ```
 `src\styles\header.css`:
 
@@ -722,6 +739,13 @@ body {
   border-radius: var(--radius-sm);
 }
 
+.modal__plays {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
 ```
 `src\styles\pagination.css`:
 
@@ -878,6 +902,30 @@ body {
   border-color: var(--border);
   box-shadow: inset 0 -3px 0 var(--c-yellow);
   font-weight: 700;
+}
+
+/* 並び替え・プレイ回数の期間 */
+.top-bar__controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.top-bar__select {
+  height: 34px;
+  padding: 0 12px;
+  border: 2px solid var(--border);
+  border-radius: 17px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.top-bar__select:focus {
+  outline: none;
+  border-color: var(--c-blue);
 }
 
 ```

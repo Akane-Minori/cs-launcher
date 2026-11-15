@@ -1,4 +1,4 @@
-import { downloadGame } from './fromRust';
+import { downloadGame, getGameStatus, uninstallGame } from './fromRust';
 import type { GameEntry } from './api';
 
 type BeginListener = () => void;
@@ -19,11 +19,25 @@ export function beginDownload(gameId: string): void {
 /**
  * ダウンロード処理そのものをまとめた共通関数。
  * 個別の「ダウンロード」ボタンからも、「すべてダウンロード」からも、これを呼ぶ。
+ *
+ * すでにダウンロード済みの場合は「アップデート」とみなし、
+ * 確認ダイアログ → 既存フォルダ削除 → 入れ直し の順で進める。
+ * 確認でキャンセルされた場合は何もせず false を返す。
  */
 export async function startDownload(game: GameEntry): Promise<boolean> {
   if (isDownloading(game.id)) return false; // 二重起動防止
+
+  const isUpdate = (await getGameStatus(game.id)) === 'downloaded';
+  if (isUpdate) {
+    const ok = confirm(
+      `「${game.title}」を更新します。ゲームフォルダを削除して入れ直すため、セーブデータが消える場合があります。続けますか?`
+    );
+    if (!ok) return false;
+  }
+
   beginDownload(game.id);
   try {
+    if (isUpdate) await uninstallGame(game.id);
     await downloadGame(game, (downloaded, total) => reportProgress(game.id, downloaded, total));
     finishDownload(game.id, { success: true });
     return true;

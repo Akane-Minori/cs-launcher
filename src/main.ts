@@ -1,4 +1,4 @@
-import { listCampaigns, listGames, listPlays, openGamesRootFolder } from './fromRust';
+import { checkLauncherUpdate, listCampaigns, listGames, listPlays, openGamesRootFolder, selfUpdate } from './fromRust';
 import { renderCampaigns, renderPagination } from './listView';
 import { createGameCard } from './gameCard';
 import { renderHeader, renderTopBar, type ViewType } from './topArea';
@@ -21,6 +21,50 @@ let currentPage = 1;
 let activeYear: number | null = null;
 let sortKey: SortKey = 'default';
 let playPeriod: PlayPeriod = 'all';
+
+/**
+ * 起動時に呼ぶ。ランチャー本体の新しい版があれば、画面の上にバナーと更新ボタンを出す。
+ * 確認に失敗(オフラインなど)しても、何も出さずに終わる。
+ */
+async function showLauncherUpdateBanner(): Promise<void> {
+  let info;
+  try {
+    info = await checkLauncherUpdate();
+  } catch {
+    return;
+  }
+  if (!info) return;
+  if (document.querySelector('.update-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.className = 'update-banner';
+  banner.style.cssText =
+    'display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 16px;background:#1d4ed8;color:#fff;font-size:14px;';
+
+  const text = document.createElement('span');
+  text.textContent = `ランチャーの新しい版 v${info.latest} があります(現在 v${info.current})`;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '更新して再起動';
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await selfUpdate(info.filename, (downloaded, total) => {
+        const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+        btn.textContent = `ダウンロード中… ${pct}%`;
+      });
+    } catch (err) {
+      alert(`ランチャーの更新に失敗しました: ${err}`);
+      btn.disabled = false;
+      btn.textContent = '更新して再起動';
+    }
+  });
+
+  banner.append(text, btn);
+  document.body.insertAdjacentElement('afterbegin', banner);
+}
 
 async function init() {
   const appEl = document.querySelector<HTMLElement>('#app');
@@ -69,6 +113,9 @@ async function init() {
   }
 
   renderHeader(headerEl, activeView, handleNavigate, handleOpenGamesFolder, handleGacha);
+
+  // ランチャー本体の新しい版があれば、バナーを出す(待たずに裏で確認する)
+  void showLauncherUpdateBanner();
 
   try {
     // プレイ回数が取れなくても、ゲーム一覧は出す

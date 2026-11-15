@@ -1,6 +1,6 @@
 import { type GameEntry, type GameStatus, thumbUrl, renderFolderSize, renderRemoteSize, hideFolderSize, escapeHtml } from './api';
 import { getGameStatus, fetchThumbnailDataUrl } from './fromRust';
-import { isFavorite, toggleFavorite, getNote, setNote, PLAY_PERIODS, PLAY_PERIOD_LABELS, getPlayCount } from './localStore';
+import { isFavorite, toggleFavorite, getNote, setNote, getPlayCount } from './localStore';
 import { renderGameActions } from './gameCard';
 import { isDownloading } from './downloadState';
 
@@ -54,7 +54,7 @@ export function openDetailModal(
                 .join(', ')
             : '不明'
         }</p>
-        <p class="modal__plays">プレイ回数: ${PLAY_PERIODS.map((p) => `${PLAY_PERIOD_LABELS[p]} ${getPlayCount(game.id, p)}回`).join(' / ')}</p>
+        <p class="modal__plays">▶ ${getPlayCount(game.id)}回</p>
         <p class="modal__size" id="modal-size" hidden></p>
 
         <div class="modal__progress" hidden>
@@ -305,4 +305,3 @@ function wrapText(
   lines.push(line);
   lines.slice(0, maxLines).forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
 }
-
