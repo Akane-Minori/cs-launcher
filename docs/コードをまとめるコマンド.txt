@@ -1,3 +1,0 @@
-code2prompt -i "src/**/*.ts" -i "src-tauri/src/**/*.rs" -O "docs/code.md"
-
-code2prompt -i "src/styles/*" -O "docs/styles.md"
